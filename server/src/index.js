@@ -1,9 +1,24 @@
 import { WebSocketServer } from 'ws';
 import { spawn } from 'node-pty';
 import { randomUUID } from 'crypto';
+import { createServer } from 'http';
+import { networkInterfaces } from 'os';
 
 const PORT = process.env.PORT || 8765;
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token-change-me';
+
+function getLocalIPs() {
+  const nets = networkInterfaces();
+  const ips = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        ips.push({ name, address: net.address });
+      }
+    }
+  }
+  return ips;
+}
 
 const sessions = new Map();
 const clientSessions = new Map();
@@ -117,8 +132,36 @@ function handleMessage(ws, msg) {
   }
 }
 
-const wss = new WebSocketServer({ port: PORT }, () => {
-  console.log(`DroidControl server listening on ws://localhost:${PORT}`);
+const httpServer = createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      name: 'DroidControl',
+      version: '0.1.0',
+      ports: { ws: PORT },
+      interfaces: getLocalIPs(),
+    }));
+  } else if (req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('DroidControl Server');
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+
+const wss = new WebSocketServer({ server: httpServer });
+
+httpServer.listen(PORT, () => {
+  const ips = getLocalIPs();
+  console.log(`DroidControl server listening on port ${PORT}`);
+  console.log(`WebSocket: ws://0.0.0.0:${PORT}`);
+  console.log(`HTTP health: http://0.0.0.0:${PORT}/health`);
+  if (ips.length) {
+    console.log(`Network interfaces:`);
+    ips.forEach(({ name, address }) => console.log(`  ${name}: ${address}`));
+  }
 });
 
 wss.on('connection', (ws, req) => {
